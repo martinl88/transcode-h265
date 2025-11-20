@@ -57,10 +57,14 @@ fi
 # Configuration
 INPUT_DIR="${1:-.}"  # First argument or current directory
 OUTPUT_DIR="${2:-./transcoded}"  # Second argument or ./transcoded
+
+# Remove trailing slashes from directories
+INPUT_DIR="${INPUT_DIR%/}"
+OUTPUT_DIR="${OUTPUT_DIR%/}"
 HW_ACCEL="auto"  # Options: auto, nvenc, qsv
 PRESET="medium"  # Encoding preset (depends on encoder)
-CRF="23"  # Quality: 0-51, lower is better quality (23 is default)
-SUBTITLE_LANGS=""  # Comma-separated language codes (e.g., "eng,spa") or empty for all
+CRF="24"  # Quality: 0-51, lower is better quality (23 is default)
+SUBTITLE_LANGS="eng,est"  # Comma-separated language codes (e.g., "eng,spa") or empty for all
 
 # Supported video extensions
 VIDEO_EXTENSIONS=("mp4" "mkv" "avi" "mov" "flv" "wmv" "webm" "m4v" "mpg" "mpeg")
@@ -164,6 +168,43 @@ failed=0
 total_original_size=0
 total_transcoded_size=0
 
+# Function to convert language code to full name
+get_language_name() {
+    local code="$1"
+    case "${code,,}" in
+        eng) echo "English" ;;
+        spa) echo "Spanish" ;;
+        fre|fra) echo "French" ;;
+        ger|deu) echo "German" ;;
+        ita) echo "Italian" ;;
+        por) echo "Portuguese" ;;
+        rus) echo "Russian" ;;
+        jpn) echo "Japanese" ;;
+        chi|zho) echo "Chinese" ;;
+        kor) echo "Korean" ;;
+        ara) echo "Arabic" ;;
+        hin) echo "Hindi" ;;
+        dut|nld) echo "Dutch" ;;
+        swe) echo "Swedish" ;;
+        nor) echo "Norwegian" ;;
+        dan) echo "Danish" ;;
+        fin) echo "Finnish" ;;
+        pol) echo "Polish" ;;
+        tur) echo "Turkish" ;;
+        gre|ell) echo "Greek" ;;
+        heb) echo "Hebrew" ;;
+        cze|ces) echo "Czech" ;;
+        hun) echo "Hungarian" ;;
+        rum|ron) echo "Romanian" ;;
+        tha) echo "Thai" ;;
+        vie) echo "Vietnamese" ;;
+        ind) echo "Indonesian" ;;
+        may|msa) echo "Malay" ;;
+        ukr) echo "Ukrainian" ;;
+        *) echo "$code" ;;  # Return original code if not found
+    esac
+}
+
 # Function to transcode a single file
 transcode_file() {
     local input_file="$1"
@@ -190,18 +231,28 @@ transcode_file() {
     # Step 1: Extract all subtitle streams
     echo "  Extracting subtitles..."
     local subtitle_count=$(ffprobe -v error -select_streams s -show_entries stream=index -of csv=p=0 "$input_file" 2>/dev/null | wc -l)
+    # echo "  DEBUG: Total subtitle streams found: $subtitle_count"
     
     local subtitle_files=()
     local subtitle_map_args=()
     local subtitle_metadata_args=()
     
     if [ "$subtitle_count" -gt 0 ]; then
-        local stream_index=0
         local extracted_count=0
-        while IFS= read -r stream_info; do
-            local codec=$(echo "$stream_info" | cut -d'|' -f1)
-            local title=$(echo "$stream_info" | cut -d'|' -f2)
-            local language=$(echo "$stream_info" | cut -d'|' -f3)
+        local subtitle_index=0
+        while IFS=',' read -r codec title language; do
+            # Trim any whitespace from all fields
+            codec=$(echo "$codec" | xargs)
+            title=$(echo "$title" | xargs)
+            language=$(echo "$language" | xargs)
+            
+            # echo "  DEBUG: Stream ${subtitle_index}: codec='$codec' title='$title' language='$language'"
+            
+            # If language is empty but title looks like a language code, use title as language
+            if [ -z "$language" ] && [ -n "$title" ] && [ ${#title} -le 3 ]; then
+                language="$title"
+                title=""
+            fi
             
             # Determine subtitle format based on codec
             local sub_ext="srt"
@@ -243,8 +294,8 @@ transcode_file() {
                 done
                 
                 if [ "$keep_subtitle" = false ]; then
-                    echo -e "  ${YELLOW}Skipping subtitle stream ${stream_index} (language: ${language:-unknown})${NC}"
-                    ((stream_index++))
+                    echo -e "  ${YELLOW}Skipping subtitle stream ${subtitle_index} (language: ${language:-unknown})${NC}"
+                    ((subtitle_index++))
                     continue
                 fi
             fi
@@ -254,24 +305,36 @@ transcode_file() {
                 echo -e "  ${YELLOW}Warning: Bitmap subtitle detected (${codec}) - may not be compatible with MP4/mov_text${NC}"
             fi
             
-            local subtitle_file="$temp_dir/subtitle_${stream_index}.${sub_ext}"
+            local subtitle_file="$temp_dir/subtitle_${subtitle_index}.${sub_ext}"
             
-            # Extract subtitle stream
-            if ffmpeg -i "$input_file" -map 0:s:${stream_index} "$subtitle_file" -hide_banner -loglevel error 2>/dev/null; then
+            # Extract subtitle stream (using subtitle-relative index)
+            if ffmpeg -i "$input_file" -map 0:s:${subtitle_index} "$subtitle_file" -hide_banner -loglevel error </dev/null 2>/dev/null; then
                 subtitle_files+=("$subtitle_file")
                 subtitle_map_args+=("-i" "$subtitle_file")
                 
-                # Preserve metadata with correct output index
-                [ -n "$language" ] && subtitle_metadata_args+=("-metadata:s:s:${extracted_count}" "language=${language}")
-                [ -n "$title" ] && subtitle_metadata_args+=("-metadata:s:s:${extracted_count}" "title=${title}")
+                # Set metadata with language name as title
+                if [ -n "$language" ]; then
+                    local language_name=$(get_language_name "$language")
+                    subtitle_metadata_args+=("-metadata:s:s:${extracted_count}" "language=${language}")
+                    # Use full language name as title if no title exists, otherwise keep original title
+                    if [ -n "$title" ]; then
+                        subtitle_metadata_args+=("-metadata:s:s:${extracted_count}" "title=${title}")
+                    else
+                        subtitle_metadata_args+=("-metadata:s:s:${extracted_count}" "title=${language_name}")
+                    fi
+                elif [ -n "$title" ]; then
+                    subtitle_metadata_args+=("-metadata:s:s:${extracted_count}" "title=${title}")
+                fi
                 
                 ((extracted_count++))
             else
-                echo -e "  ${RED}Warning: Failed to extract subtitle stream ${stream_index} (${codec})${NC}"
+                echo -e "  ${RED}Warning: Failed to extract subtitle stream ${subtitle_index} (${codec})${NC}"
             fi
             
-            ((stream_index++))
+            ((subtitle_index++))
         done < <(ffprobe -v error -select_streams s -show_entries stream=codec_name:stream_tags=title,language -of csv=p=0 "$input_file" 2>/dev/null)
+        
+        # echo "  DEBUG: Loop completed. Processed $subtitle_index subtitle streams"
         
         if [ ${#subtitle_files[@]} -gt 0 ]; then
             echo "  Found ${#subtitle_files[@]} subtitle stream(s)"
