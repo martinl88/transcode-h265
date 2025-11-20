@@ -173,6 +173,7 @@ get_language_name() {
     local code="$1"
     case "${code,,}" in
         eng) echo "English" ;;
+        est) echo "Estonian" ;;
         spa) echo "Spanish" ;;
         fre|fra) echo "French" ;;
         ger|deu) echo "German" ;;
@@ -212,8 +213,8 @@ transcode_file() {
     local name="${filename%.*}"
     local ext="${filename##*.}"
     local unique_id="${name}_${ext}_$$"
-    local output_file="$OUTPUT_DIR/${name}_h265.mp4"
-    local temp_video="$OUTPUT_DIR/.${unique_id}_temp.mp4"
+    local output_file="$OUTPUT_DIR/${name}_h265.${ext}"
+    local temp_video="$OUTPUT_DIR/.${unique_id}_temp.${ext}"
     local temp_dir="$OUTPUT_DIR/.subtitles_${unique_id}"
     
     # Skip if output file already exists
@@ -383,6 +384,14 @@ transcode_file() {
     if [ ${#subtitle_files[@]} -gt 0 ]; then
         echo "  Adding subtitles to transcoded file..."
         
+        # Determine subtitle codec based on container
+        local subtitle_codec="copy"
+        local extra_args=()
+        if [[ "${ext,,}" == "mp4" ]] || [[ "${ext,,}" == "m4v" ]] || [[ "${ext,,}" == "mov" ]]; then
+            subtitle_codec="mov_text"
+            extra_args+=("-movflags" "+faststart")
+        fi
+        
         # Build the subtitle mapping arguments
         local map_args=("-i" "$temp_video")
         map_args+=("${subtitle_map_args[@]}")
@@ -394,9 +403,9 @@ transcode_file() {
         done
         
         # Add codec and metadata arguments
-        map_args+=("-c:v" "copy" "-c:a" "copy" "-c:s" "mov_text")
+        map_args+=("-c:v" "copy" "-c:a" "copy" "-c:s" "$subtitle_codec")
         map_args+=("${subtitle_metadata_args[@]}")
-        map_args+=("-movflags" "+faststart")
+        map_args+=("${extra_args[@]}")
         
         if ffmpeg "${map_args[@]}" "$output_file" -hide_banner -loglevel error -stats; then
             # Validate output file
