@@ -175,6 +175,13 @@ transcode_file() {
     local temp_video="$OUTPUT_DIR/.${unique_id}_temp.mp4"
     local temp_dir="$OUTPUT_DIR/.subtitles_${unique_id}"
     
+    # Skip if output file already exists
+    if [ -f "$output_file" ]; then
+        echo -e "${YELLOW}Skipping: $filename (already transcoded)${NC}"
+        echo "----------------------------------------"
+        return 0
+    fi
+    
     echo -e "${YELLOW}Processing: $filename${NC}"
     
     # Create temporary directory for subtitles
@@ -276,27 +283,37 @@ transcode_file() {
     # Step 2: Transcode video to temporary file
     echo "  Transcoding video..."
     
-    # Build encoder-specific arguments
-    local encoder_args=()
+    # Build ffmpeg command based on encoder
     if [[ "$ENCODER" == "hevc_nvenc" ]]; then
-        encoder_args+=("-hwaccel" "$HWACCEL_DEVICE" "-c:v" "$ENCODER" "-preset" "$PRESET" "-rc" "vbr" "-cq" "$CRF" "-b:v" "0")
+        if ! ffmpeg -hwaccel "$HWACCEL_DEVICE" -i "$input_file" \
+            -c:v "$ENCODER" -preset "$PRESET" -rc vbr -cq "$CRF" -b:v 0 \
+            -c:a copy \
+            -map 0:v -map 0:a? \
+            "$temp_video" \
+            -hide_banner -loglevel error -stats; then
+            
+            echo -e "${RED}✗ Failed: $filename (transcoding)${NC}"
+            rm -rf "$temp_dir"
+            [ -f "$temp_video" ] && rm "$temp_video"
+            ((failed++))
+            echo "----------------------------------------"
+            return 1
+        fi
     elif [[ "$ENCODER" == "hevc_qsv" ]]; then
-        encoder_args+=("-hwaccel" "$HWACCEL_DEVICE" "-c:v" "$ENCODER" "-preset" "$PRESET" "-global_quality" "$CRF")
-    fi
-    
-    if ! ffmpeg -i "$input_file" \
-        "${encoder_args[@]}" \
-        -c:a copy \
-        -map 0:v -map 0:a? \
-        "$temp_video" \
-        -hide_banner -loglevel error -stats; then
-        
-        echo -e "${RED}✗ Failed: $filename (transcoding)${NC}"
-        rm -rf "$temp_dir"
-        [ -f "$temp_video" ] && rm "$temp_video"
-        ((failed++))
-        echo "----------------------------------------"
-        return 1
+        if ! ffmpeg -hwaccel "$HWACCEL_DEVICE" -i "$input_file" \
+            -c:v "$ENCODER" -preset "$PRESET" -global_quality "$CRF" \
+            -c:a copy \
+            -map 0:v -map 0:a? \
+            "$temp_video" \
+            -hide_banner -loglevel error -stats; then
+            
+            echo -e "${RED}✗ Failed: $filename (transcoding)${NC}"
+            rm -rf "$temp_dir"
+            [ -f "$temp_video" ] && rm "$temp_video"
+            ((failed++))
+            echo "----------------------------------------"
+            return 1
+        fi
     fi
     
     # Step 3: Add subtitles back to the transcoded file
@@ -405,13 +422,32 @@ transcode_file() {
     echo "----------------------------------------"
 }
 
-# Find and process all video files
+# Find all video files first
+echo "Searching for video files in: $INPUT_DIR"
+declare -a video_files
 for ext in "${VIDEO_EXTENSIONS[@]}"; do
     while IFS= read -r -d '' file; do
-        ((total_files++))
-        transcode_file "$file"
+        video_files+=("$file")
+        echo "Found: $(basename "$file")"
     done < <(find "$INPUT_DIR" -maxdepth 1 -type f -iname "*.${ext}" -print0)
 done
+
+echo "Total files found: ${#video_files[@]}"
+echo ""
+
+# Process all video files
+for file in "${video_files[@]}"; do
+    ((total_files++))
+    transcode_file "$file"
+done
+
+echo "Processing complete. Total files processed: $total_files"
+
+# Check if any files were found
+if [ $total_files -eq 0 ]; then
+    echo -e "${YELLOW}No video files found in: $INPUT_DIR${NC}"
+    echo "Supported extensions: ${VIDEO_EXTENSIONS[*]}"
+fi
 
 # Print summary
 echo -e "${GREEN}Transcoding Complete!${NC}"
