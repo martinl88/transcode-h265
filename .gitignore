@@ -1,0 +1,22 @@
+# Transcoded output directory
+transcoded/
+
+# Temporary files
+.*_temp.mp4
+.subtitles_*/
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor files
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# Test files
+test_videos/
+samples/
