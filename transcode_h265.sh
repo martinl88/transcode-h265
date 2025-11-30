@@ -65,6 +65,7 @@ HW_ACCEL="auto"  # Options: auto, nvenc, qsv
 PRESET="medium"  # Encoding preset (depends on encoder)
 CRF="24"  # Quality: 0-51, lower is better quality (23 is default)
 SUBTITLE_LANGS="eng,est"  # Comma-separated language codes (e.g., "eng,spa") or empty for all
+RESIZE_TO_FULLHD="${RESIZE_TO_FULLHD:-false}"  # Set to true/1 to resize video to 1080p
 
 # Supported video extensions
 VIDEO_EXTENSIONS=("mp4" "mkv" "avi" "mov" "flv" "wmv" "webm" "m4v" "mpg" "mpeg")
@@ -213,7 +214,7 @@ transcode_file() {
     local name="${filename%.*}"
     local ext="${filename##*.}"
     local unique_id="${name}_${ext}_$$"
-    local output_file="$OUTPUT_DIR/${name}_h265.${ext}"
+    local output_file="$OUTPUT_DIR/${name}.${ext}"
     local temp_video="$OUTPUT_DIR/.${unique_id}_temp.${ext}"
     local temp_dir="$OUTPUT_DIR/.subtitles_${unique_id}"
     
@@ -347,10 +348,16 @@ transcode_file() {
     # Step 2: Transcode video to temporary file
     echo "  Transcoding video..."
     
+    local vf_args=()
+    if [[ "$RESIZE_TO_FULLHD" == "true" || "$RESIZE_TO_FULLHD" == "1" ]]; then
+        vf_args=(-vf "scale=-2:1080")
+    fi
+    
     # Build ffmpeg command based on encoder
     if [[ "$ENCODER" == "hevc_nvenc" ]]; then
         if ! ffmpeg -hwaccel "$HWACCEL_DEVICE" -i "$input_file" \
             -c:v "$ENCODER" -preset "$PRESET" -rc vbr -cq "$CRF" -b:v 0 \
+            "${vf_args[@]}" \
             -c:a copy \
             -map 0:v -map 0:a? \
             "$temp_video" \
@@ -366,6 +373,7 @@ transcode_file() {
     elif [[ "$ENCODER" == "hevc_qsv" ]]; then
         if ! ffmpeg -hwaccel "$HWACCEL_DEVICE" -i "$input_file" \
             -c:v "$ENCODER" -preset "$PRESET" -global_quality "$CRF" \
+            "${vf_args[@]}" \
             -c:a copy \
             -map 0:v -map 0:a? \
             "$temp_video" \
