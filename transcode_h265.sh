@@ -63,9 +63,9 @@ INPUT_DIR="${INPUT_DIR%/}"
 OUTPUT_DIR="${OUTPUT_DIR%/}"
 HW_ACCEL="auto"  # Options: auto, nvenc, qsv
 PRESET="medium"  # Encoding preset (depends on encoder)
-CRF="24"  # Quality: 0-51, lower is better quality (23 is default)
+CRF="23"  # Quality: 0-51, lower is better quality (23 is default)
 SUBTITLE_LANGS="eng,est"  # Comma-separated language codes (e.g., "eng,spa") or empty for all
-RESIZE_TO_FULLHD="${RESIZE_TO_FULLHD:-false}"  # Set to true/1 to resize video to 1080p
+RESIZE_TO_FULLHD="true"  # Set to true/1 to resize video to 1080p
 
 # Supported video extensions
 VIDEO_EXTENSIONS=("mp4" "mkv" "avi" "mov" "flv" "wmv" "webm" "m4v" "mpg" "mpeg")
